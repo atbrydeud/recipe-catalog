@@ -1,0 +1,67 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+# Vagrantfile API/syntax version. Don't touch unless you know what you're doing!
+VAGRANTFILE_API_VERSION = "2"
+
+$bootstrap_ubuntu = <<SCRIPT
+apt-get update
+apt-get install -y autoconf automake gcc libtool libxml2 libxml2-dev m4 make cmake openssl libssl-dev pkg-config dbus dbus-*dev
+apt-get install -y linux-headers-$(uname -r) libxslt1-dev libssh2-1-dev libcurl4-openssl-dev xsltproc wget git python-setuptools g++
+apt-get install -y libpcap-dev libxerces-c2-dev libpcre3-dev flex bison libboost-all-dev unzip
+apt-get clean && apt-get purge
+SCRIPT
+
+$install_java = <<SCRIPT
+apt-get install software-properties-common -y
+add-apt-repository ppa:openjdk-r/ppa -y
+apt-get update
+apt-get install openjdk-8-jdk -y
+export JAVA_HOME=/usr/lib/jvm/java-1.8.0-openjdk-amd64
+export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:\$JAVA_HOME/bin
+SCRIPT
+
+$install_OfSoftSwitch = <<SCRIPT
+wget http://www.nbee.org/download/nbeesrc-12-05-16.zip
+unzip nbeesrc-12-05-16.zip
+cd nbeesrc/src
+cmake .
+make
+cp ../bin/libn*.so /usr/local/lib
+ldconfig
+cp -R ../include/* /usr/include/
+cd ../../
+git clone https://github.com/zhangmroy/ofsoftswitch13.git
+pushd ofsoftswitch13
+./boot.sh
+./configure
+make
+make install
+SCRIPT
+
+$download_odl = <<SCRIPT
+wget https://nexus.opendaylight.org/content/groups/public/org/opendaylight/integration/distribution-karaf/0.4.3-Beryllium-SR3/distribution-karaf-0.4.3-Beryllium-SR3.tar.gz
+tar -xvzf distribution-karaf-0.4.3-Beryllium-SR3.tar.gz
+SCRIPT
+
+$cleanup = <<SCRIPT
+  aptitude clean
+  rm -rf /tmp/*
+SCRIPT
+
+Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
+  config.vm.define "nemovm" do |nemovm|
+    config.vm.provider "virtualbox" do |v|
+      v.customize ["modifyvm", :id, "--cpuexecutioncap", "50"]
+      v.customize ["modifyvm", :id, "--memory", "2024"]
+    end
+     nemovm.vm.box = "ubuntu/precise64"
+     nemovm.vm.hostname = "Nemo-vm"
+     nemovm.vm.network "public_network", bridge: "en0: Wi-Fi (AirPort)"
+     nemovm.vm.provision :shell, inline: $bootstrap_ubuntu
+     #nemovm.vm.provision :shell, inline: $install_java
+     nemovm.vm.provision :shell, inline: $install_OfSoftSwitch
+     #nemovm.vm.provision :shell, inline: $download_odl
+     nemovm.vm.provision :shell, inline: $cleanup
+  end
+end

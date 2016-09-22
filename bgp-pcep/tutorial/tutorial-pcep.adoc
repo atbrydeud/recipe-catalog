@@ -1,0 +1,124 @@
+= 'Abstract'
+Path computation Element communication protocol (PCEP) is a standardized way to delegate the job of optimal path computation from router to an external application such as OpenDaylight SDN Controller.
+PCEP project in OpenDaylight provide Java-based implementations of PCEP protocol to communicate with underlying network in a standardized way.
+The project allows you to establish a Path computation client (PCC) e.g. a router to Path Computation Engine (PCE) connection e.g. OpenDaylight.
+On a successful PCC-PCE session establishment, the routers running PCC allows the PCE (OpenDaylight) to use the protocol to instruct the routers to program paths/tunnels.
+The project PCEP topology provide to access the network topology along with easy ways to retrieve PCEP session statistics.
+Opendaylight's northbound service exposes can add, update and delete tunnels between the network elements in a network.
+
+= 'Use-case': How to configure and manage tunnels using OpenDaylight's PCEP implementation?
+**Description:** +
+This tutorial will guide you through the manual configuration of OpenDaylight controller XML files to connect with a PCC client using PCEP.
+Once the PCC to PCE connection is established, PCEP remote procedure call implementations can be used manage the LSPs.
+
+**Preconditions:** +
+
+- Inocybe's Open Networking Platform registration:
+        It is assumed that you have registered at https://platform.inocybe.com
+        Once the registration in complete you should be able to access the recipe YAML file and distribution file for BGP-PCEP.
+        Download the distribution locally and extract its contents.
+
+- VirtualBox:
+        Download VirtualBox and install it from https://www.virtualbox.org/wiki/Downloads
+
+- Vagrant:
+        Download Vagrant and install it from https://www.vagrantup.com/downloads.html
+
+- The tutorial's material from GitHub:
+        You can download the tutorial's material from https://github.com/rushmep3/bgp-pcep-VMs
+
+- REST-API client:
+        We recommend using Postman as REST-API client https://www.getpostman.com/
+
+**Background:** +
+In this tutorial we will manually configure of OpenDaylight controller XML files as Path Computation Engine (PCE) to connect with a Path Computation Client (PCC) using Path Computation Element Communication Protocol (PCEP).
+Once the connection is established, PCC can request path computations PCE. Opendaylight the controller can be used to view Label Switched Paths and PCC information.
+The PCEP Restful API can be used to perform CRUD type of operations for tunnel management.
+
+== How to do it...
+
+**Configuring PCEP** +
+* Start Opendaylight in the host machine and install PCEP related features to pull all the necessary dependencies to enable PCEP implementation.
+Open new console and go to the directory where you download Opendaylight distribution:
+
+    $ tar -xvzf <DISTRO_FILE_NAME> or unzip <DISTRO_FILE_NAME>
+    $ cd <DISTRO_FILE_NAME>
+    $ ./bin/karaf
+
+At Opendaylight Karaf console, you will find all the required PCEP features (odl-bgpcep-pcep-all odl-restconf-all odl-netconf-all) have been installed by default.
+Use the following command to check the installed features.
+
+    opendaylight-user@root>feature:list -i | grep pcep
+
+* Since the features are installed, the baseline XML configuration files are already created.
+PCEP implementation in Opendaylight provides three main configuration files:
+
+- 32-pcep.xml: Basic PCEP configurations such as the session parameters and need not be modified.
+
+- 39-pcep-provider.xml: Sample configuration for a PCEP provider. The PCEP default settings are meant for stateful (stateful07) PCEP extension. It needs to be updated for server binding settings to suit your deployment.
+
+- 33-pcep-segment-routing.xml: PCEP provider configuration for segment routing and need not be changed.
+
+Stop the Opendaylight Karaf instance to edit the XML config files:
+
+    opendaylight-user@root>logout
+
+The XML config files are located under etc/opendaylight/karaf directory:
+
+    $ ls <DISTRO_FILE_NAME>/etc/opendaylight/karaf/
+    ....     32-pcep.xml         39-pcep-provider.xml    33-pcep-segment-routing.xml    ....
+
+* Configuring PCE server bindings:
+Add the 'listen-address' and 'listen-port' to 39-pcep-provider.xml in order to start the PCE server at a given IP address and port:
+
+    <module>
+      <type xmlns:prefix="urn:opendaylight:params:xml:ns:yang:controller:pcep:topology:provider">prefix:pcep-topology-provider</type>
+      <name>pcep-topology</name>
+      <listen-address>$ODL_IP</listen-address>
+      <listen-port>$PORT</listen-port>
+      ...
+    </module>
+
+listen-address: IP address on which PCE will be started and listen
+listen-port: port on which the address will be started and listen
+
+* Once the configuration is made and restart the Karaf instance for the configurations to take effect.
+
+    opendaylight-user@root>logout
+    $ ./bin/karaf clean
+
+Reinstall the features:
+    opendaylight-user@root>feature:install odl-bgpcep-pcep-all odl-restconf-all odl-netconf-all
+
+**Tunnel Management using PCEP** +
+* Running pcc-mock client:
+
+From the tutorials material, refer to the README for “pcc-mock” for argument details.
+We run “pcc-mock” as below sample:
+
+    $ java -jar pcep-pcc-mock-0.5.3-executable.jar --local-address <PCC_IP>
+      --remote-address <PCE_IP:PORT> --state-sync-avoidance 2 2 2 --incremental-sync-procedure 2 2 2 --triggered-initial-sync --triggered-re-sync
+
+    $ java -jar pcep-pcc-mock-0.5.3-executable.jar --local-address 192.168.1.208
+    --remote-address 192.168.1.102:4185 --state-sync-avoidance 2 2 2 --incremental-sync-procedure 2 2 2 --triggered-initial-sync --triggered-re-sync
+
+Note: the local address is the PCC IP address and PCE address should be the Opendaylight IP address and the port number.
+You should now be able to see the below output to your console:
+
+    06:11:52.119 [main] INFO  o.o.t.jni.NativeKeyAccessFactory - Library /tmp/libtcpmd5-jni.so2285157135999201656.tmp loaded
+    06:11:52.332 [nioEventLoopGroup-2-1] INFO  o.o.p.p.impl.PCEPSessionNegotiator - Replacing bootstrap negotiator for channel [id: 0xba788ebc, L:/192.168.1.208:54663 - R:/192.168.1.102:4189]
+    06:11:52.478 [nioEventLoopGroup-2-1] INFO  o.o.p.p.i.AbstractPCEPSessionNegotiator - PCEP session with [id: 0xba788ebc, L:/192.168.1.208:54663 - R:/192.168.1.102:4189] started, sent proposal Open [_deadTimer=120, _keepalive=30, _sessionId=0, _tlvs=Tlvs [augmentation=[Tlvs1 [_stateful=Stateful [_lspUpdateCapability=true, augmentation=[Stateful1 [_deltaLspSyncCapability=true, _includeDbVersion=true, _triggeredInitialSync=true, _triggeredResync=true], Stateful1 [_initiation=true]]]], Tlvs3 [_lspDbVersion=LspDbVersion [_lspDbVersionValue=1, augmentation=[]]]]], augmentation=[]]
+    06:11:52.756 [nioEventLoopGroup-2-1] INFO  o.o.p.p.i.AbstractPCEPSessionNegotiator - PCEP peer [id: 0xba788ebc, L:/192.168.1.208:54663 - R:/192.168.1.102:4189] completed negotiation
+    06:11:52.761 [nioEventLoopGroup-2-1] INFO  o.o.p.pcep.impl.PCEPSessionImpl - Session /192.168.1.208:54663[0] <-> /192.168.1.102:4189[0] started
+
+* Import the tutorial-pcep json payload collection to Postman. Open postman application and use the import button to navigate to the tutorial material directory
+and add the tutorial-pcep.postman_collection.json to your collection.
+
+Use the REST GET requests to get the PCEP topology. This should list the PCC client IP address.
+
+Once the PCC to PCE connection is established, PCEP remote procedure call implementations can be used manage the LSPs.
+The postman collection has POST operations for the rpcs: add-lsp, remove-lsp, update-lsp.
+Be sure to update the IP addresses to match your environment.
+
+== Conclusion
+Opendaylight provides PCEP implementation to configure ODL as a PCE server and to program tunnels using PCEP.

@@ -1,0 +1,344 @@
+= 'Abstract'
+Border Gateway Protocol (BGP) is the core routing protocol that makes the internet work.
+It offers mechanisms by which Link State and Traffic Engineering information can be collected from networks and shared with external components.
+BGP-LS project in OpenDaylight provide Java-based implementations of BGP protocol to communicate with underlying network in a standardized way.
+The project allows you to establish a BGP session between OpenDaylight and a BGP-LS router which could be a part of a bigger network of routers running MPLS, IGP protocols (OSPF or IS-IS).
+Once a successful BGP session is established, ODL can receive BGP route updates from its peer to define topology providers for BGP. It also offers easy ways to retrieve BGP session statistics.
+In addition to accessing the network topology, ODL's northbound service can be used inject IPv4/IPv6 routes (internet routes), Link-state routes (intra-domain routes) and FlowSpec routes (packet filters for rate-limiting and traffic filtering).
+
+= 'Use-case': How to configure and manage BGP information in a network using OpenDaylight's BGP implementation?
+**Description:** +
+This tutorial will guide you through the manual configuration of OpenDaylight controller XML files to connect with a router using BGP.
+
+Once the BGP session is established, the controller can receive route information from the router using RestCONF.
+Accompanied with the tutorial is a Vagrantfile for out-of-box Quagga configuration as BGP peer for integrating it with Opendaylight’s BGP implementation.
+
+**Preconditions:** +
+
+- Inocybe's Open Networking Platform registration:
+        It is assumed that you have registered at https://platform.inocybe.com
+        Once the registration in complete you should be able to access the recipe YAML file and distribution file for BGP-PCEP.
+        Download the distribution locally and extract its contents.
+
+- VirtualBox:
+        Download VirtualBox and install it from https://www.virtualbox.org/wiki/Downloads
+
+-  Vagrant:
+        Download Vagrant and install it from https://www.vagrantup.com/downloads.html
+
+- The tutorial's material from GitHub:
+        You can download the tutorial's material from https://github.com/rushmep3/bgp-pcep-VMs
+
+- REST-API client:
+        We recommend using Postman as REST-API client https://www.getpostman.com/
+
+**Background** +
+In this tutorial the BGP connection is be setup by configuring Quagga BGP router and Opendaylight controller as BGP Peers.
+Once the peers have been configured to exchange the routing information, a TCP connection gets established and they begin speaking BGP.
+
+Some terminology:
+
+- BGP Speakers: Routers that are configured for BGP
+
+- BGP Peers/Neighbors: Two or more BGP routers that are a part of a BGP TCP session
+
+- AS: Asynchronous domain refers to a routing domain.
+
+- RIB: Routing information base is used to store route updates.
+
+- AFI: Address Family Identifier
+
+- SAFI: Subsequent Address Family Identifier
+
+== How to do it...
+
+**Configuring BGP Speakers and BGP Peers** +
+* Let us start the Quagga VM using the Vagrantfile. Edit the Vagrantfile with correct values for the below parameters:
+
+    hostname <NAME_OF_BGP_PEER>
+    password <PASSWORD>
+    router bgp <AS_NUMBER>
+    bgp router-id <QUAGGA_VM_IP>
+    neighbor <ODL_IP> remote-as <AS_NUMBER>
+    neighbor <ODL_IP> route-reflector-client
+
+Open a new console in you host machine and go to the tutorial material directory
+
+    $ cd bgp-pcep-VMs
+    $ vagrant up
+
+It will take some time to create the VM, install the quagga and its dependencies and configure its components.
+
+* Run the following command to check if VM installation went well.
+
+   $ vagrant status
+
+You should see output like that:
+
+    Current machine states:
+    default                 running (virtualbox)
+
+Now we will Login to the quagga-vm using:
+
+    $ vagrant ssh
+
+We will get the quagga VM IP-Address information
+
+    vagrant@quagga-vm:~$ ifconfig
+
+Note the quagga-vm IP-Address we will use it later. Verify that Quagga is running using the following command:
+
+    vagrant@quagga-vm:~$ service quagga status
+    bgpd watchquagga
+
+Verify Quagga router configuration using the following command. A sample response follows the command below:
+
+    vagrant@quagga-vm:~$ sudo vtysh
+    Hello, this is Quagga (version 0.99.22.4).
+    Copyright 1996-2005 Kunihiro Ishiguro, et al.
+    quagga-vm# write terminal
+    Building configuration...
+    Current configuration:
+    !
+    end
+
+    Sample output of 'write terminal' command:
+    hostname peer-1
+    log file /var/log/quagga/bgpd.log
+    log timestamp precision 6
+    !
+    password admin
+    enable password admin
+    !
+    router bgp 64496
+    bgp router-id 192.168.1.173
+    network 192.0.2.0/24
+    neighbor 192.168.1.102 remote-as 64496
+    neighbor 192.168.1.102 route-reflector-client
+    !
+    line vty
+    exec-timeout 0 0
+    !
+
+Since we have still not configured Opendaylight as a BGP peer to the router, run the below command to verify that the BGP session status is 'Active'.
+Active state means that the router did not find its peer and is ready to restart a BGP session with its peer.
+Since, we haven't established any connection yet the counters are all zeros. Idle state also is a valid state in such a scenario.
+
+    quagga-vm# show bgp neighbors
+    BGP neighbor is <ODL_IP>, remote AS <ODL_AS_NUMBER>, local AS <QUAGGA_AS_NUMBER>, internal link
+    BGP version 4, remote router ID 0.0.0.0
+    BGP state = Active
+    Last read 00:07:37, hold time is 180, keepalive interval is 60 seconds
+    Message statistics:
+    Inq depth is 0
+    Outq depth is 0
+                         Sent       Rcvd
+    Opens:                  0          0
+    Notifications:          0          0
+    Updates:                0          0
+    Keepalives:             0          0
+    Route Refresh:          0          0
+    Capability:             0          0
+    Total:                  0          0
+    Minimum time between advertisement runs is 5 seconds
+    For address family: IPv4 Unicast
+    Route-Reflector Client
+    Community attribute sent to this neighbor(both)
+    0 accepted prefixes
+    Connections established 0; dropped 0
+    Last reset never
+    Next connect timer due in 29 seconds
+    Read thread: off  Write thread: off
+
+Now that we have Quagga BGP router all set, lets move on to configuring a BGP Peer for it using Opendaylight.
+
+* We will now start Opendaylight in the host machine and install BGP related features to pull all the necessary dependencies to enable BGP implementation.
+Open new console and go to the directory where you download Opendaylight distribution:
+
+    $ tar -xvzf <DISTRO_FILE_NAME> or unzip <DISTRO_FILE_NAME>
+    $ cd <DISTRO_FILE_NAME>
+    $ ./bin/karaf
+
+At Opendaylight Karaf console, you will find all the required BGP features (odl-bgpcep-bgp-all odl-restconf-all odl-netconf-all) have been installed by default.
+Use the following command to check the installed features.
+
+        opendaylight-user@root>feature:list -i | grep bgp
+
+* Since the features are installed, the baseline XML configuration files are already created.
+BGP implementation in Opendaylight provides two main configuration files for BGP and RIB settings as follows.
+
+- 31-bgp.xml: Settings for the basic parser and RIB. Unless you need to change AFI and SAFI, this file shall remain the same.
+
+- 41-bgp-example.xml: Sample configuration that must be edited to suit your deployment.
+
+Stop the Opendaylight Karaf instance to edit the XML config files:
+
+    opendaylight-user@root>logout
+
+The XML config files are located under etc/opendaylight/karaf directory:
+
+    $ ls <DISTRO_FILE_NAME>/etc/opendaylight/karaf/
+    ....     31-bgp.xml         41-bgp-example.xml    ....
+
+* BGP Peer configuration in 41-bgp-example.xml:
+Lets us now configure a BGP connection initiated by Opendaylight.
+
+In file 41-bgp-example.xml uncomment the module with name 'example-bgp-peer'.  The XML file is configured with a default host IP of 192.0.2.1.
+Replace the 'host' tag in this section with the Quagga router host IP address which is Opendaylight's BGP Peer.
+
+    <module>
+        <type xmlns:prefix="urn:opendaylight:params:xml:ns:yang:controller:bgp:rib:impl">prefix:bgp-peer</type>
+        <name>example-bgp-peer</name>
+        <host>$Quagga_VM_IP</host>
+        <holdtimer>180</holdtimer>
+        ....
+    </module>
+
+To add more BGP peers, add a new module with a unique peer names and IP addresses i.e. unique values for tags 'name' and 'host'.
+
+* RIB configuration in 41-bgp-example.xml:
+Update the XML file to set BGP open message fields in below section.
+
+    <module>
+        <type xmlns:prefix="urn:opendaylight:params:xml:ns:yang:controller:bgp:rib:impl">prefix:rib-impl</type>
+        <name>example-bgp-rib</name>
+        <rib-id>example-bgp-rib</rib-id>
+        <local-as>64496</local-as>
+        <bgp-rib-id>$ODL_IP</bgp-rib-id>
+        ....
+    </module>
+
+'local-as' field refers to the local autonomous-system number of where the Opendaylight controller is deployed and its value should be same as the BGP AS configured on quagga router.
+'bgp-rib-id' is set to a default IP address of 192.0.2.2 and must be updated with the management IP address of Opendaylight controller instance.
+
+* Application Peer configuration:
+
+Opendaylight can be configured for BGP Speaker functionality so that it can accept incoming BGP connections.
+For this a BGP speaker needs to register all the peers that need to be connected to it. The steps to do so are as below:
+
+- Configure RIB as mentioned above (file:41-bgp-example.xml).
+
+- Configure an application BGP Peer with its own application RIB (file:41-bgp-example.xml).
+
+    <module>
+       <type xmlns:x="urn:opendaylight:params:xml:ns:yang:controller:bgp:rib:impl">x:bgp-application-peer</type>
+       <name>example-bgp-peer-app</name>
+       <bgp-peer-id>$ODL_IP</bgp-peer-id>
+       <target-rib>
+         <type xmlns:x="urn:opendaylight:params:xml:ns:yang:controller:bgp:rib:impl">x:rib-instance</type>
+         <name>example-bgp-rib</name>
+       </target-rib>
+       <application-rib-id>example-app-rib</application-rib-id>
+       <data-broker>
+         <type xmlns:sal="urn:opendaylight:params:xml:ns:yang:controller:md:sal:dom">sal:dom-async-data-broker</type>
+         <name>pingpong-broker</name>
+       </data-broker>
+    </module>
+
+* Optionally enabling TRACE mode in Karaf logs can be useful for debugging. To do so edit file "etc/org.ops4j.pax.logging.cfg" to add the below lines:
+
+    log4j.logger.org.opendaylight.bgpcep = TRACE
+    log4j.logger.org.opendaylight.protocol = TRACE
+
+If you don't intend to debug, avoid enabling the TRACE mode to stop overrunning the karaf logs.
+
+* Once the configuration is made and restart the Karaf instance for the configurations to take effect.
+
+    $ ./bin/karaf clean
+
+Reinstall the features:
+    opendaylight-user@root>feature:install odl-bgpcep-bgp-all odl-restconf-all odl-netconf-all
+
+* Ensure that the BGP session is established between the peers by either checking Karaf logs to follow the BGP session establishment process or using the REST APIs as discussed in the "Retrieving BGP and RIB Information" section:
+
+    opendaylight-user@root>log:display | grep "BGPSessionImpl"
+    2016-08-16 14:39:29,570 | DEBUG | oupCloseable-2-1 | AbstractBGPSessionNegotiator     | 186 - org.opendaylight.bgpcep.bgp-rib-impl - 0.5.3.Beryllium-SR3 | Negotiation on channel [id: 0xdef556b3, L:/192.168.1.102:59150 - R:/192.168.1.242:179] successful with session BGPSessionImpl{channel=[id: 0xdef556b3, L:/192.168.1.102:59150 - R:/192.168.1.242:179], state=OPEN_CONFIRM}
+    2016-08-16 14:39:29,611 | DEBUG | oupCloseable-2-1 | BGPSessionImpl                   | 186 - org.opendaylight.bgpcep.bgp-rib-impl - 0.5.3.Beryllium-SR3 | Message was received: Keepalive [augmentation=[]]
+    2016-08-16 14:39:29,612 | TRACE | oupCloseable-2-1 | BGPSessionImpl                   | 186 - org.opendaylight.bgpcep.bgp-rib-impl - 0.5.3.Beryllium-SR3 | Received KeepAlive messsage.
+    2016-08-16 14:39:30,574 | DEBUG | oupCloseable-2-1 | BGPSessionImpl                   | 186 - org.opendaylight.bgpcep.bgp-rib-impl - 0.5.3.Beryllium-SR3 | Message was received: Update [_attributes=Attributes [_asPath=AsPath [_segments=[], augmentation=[]], _cNextHop=Ipv4NextHopCase [_ipv4NextHop=Ipv4NextHop [_global=Ipv4Address [_value=192.168.1.242], augmentation=[]], augmentation=[]], _localPref=LocalPref [_pref=100, augmentation=[]], _multiExitDisc=MultiExitDisc [_med=0, augmentation=[]], _origin=Origin [_value=Igp, augmentation=[]], _unrecognizedAttributes=[], augmentation=[]], _nlri=Nlri [_nlri=[Ipv4Prefix [_value=192.0.2.0/24]], augmentation=[]], augmentation=[]]
+    2016-08-16 14:39:30,803 | DEBUG | oupCloseable-2-1 | BGPSessionImpl                   | 186 - org.opendaylight.bgpcep.bgp-rib-impl - 0.5.3.Beryllium-SR3 | Message was received: Update [augmentation=[]]
+    2016-08-16 14:40:29,539 | DEBUG | oupCloseable-2-1 | BGPSessionImpl                   | 186 - org.opendaylight.bgpcep.bgp-rib-impl - 0.5.3.Beryllium-SR3 | Message was received: Keepalive [augmentation=[]]
+    2016-08-16 14:40:29,539 | TRACE | oupCloseable-2-1 | BGPSessionImpl                   | 186 - org.opendaylight.bgpcep.bgp-rib-impl - 0.5.3.Beryllium-SR3 | Received KeepAlive messsage.
+    2016-08-16 14:40:29,567 | TRACE | oupCloseable-2-1 | BGPSessionImpl                   | 186 - org.opendaylight.bgpcep.bgp-rib-impl - 0.5.3.Beryllium-SR3 | Message Keepalive [augmentation=[]] sent to socket [id: 0xdef556b3, L:/192.168.1.102:59150 - R:/192.168.1.242:179]
+
+You can also verify on Quagga VM vtysh console for Established state by running the 'show bgp neighbors' command:
+
+    quagga-vm# show bgp neighbors
+    BGP neighbor is 192.168.1.102, remote AS 64496, local AS 64496, internal link
+      BGP version 4, remote router ID 192.168.1.102
+      BGP state = Established, up for 00:04:32
+      Last read 00:00:32, hold time is 180, keepalive interval is 60 seconds
+      Neighbor capabilities:
+        4 Byte AS: advertised and received
+        Route refresh: advertised
+        Address family IPv4 Unicast: advertised and received
+        Address family VPNv4 Unicast: received
+        Address family IPv6 Unicast: received
+        Graceful Restart Capabilty: received
+          Remote Restart timer is 0 seconds
+          Address families by peer:
+            none
+      Graceful restart informations:
+        End-of-RIB send: IPv4 Unicast
+        End-of-RIB received:
+      Message statistics:
+    Inq depth is 0
+    Outq depth is 0
+                         Sent       Rcvd
+    Opens:                  1          0
+    Notifications:          0          0
+    Updates:                2          0
+    Keepalives:             6          4
+    Route Refresh:          0          0
+    Capability:             0          0
+    Total:                  9          4
+      Minimum time between advertisement runs is 5 seconds
+     For address family: IPv4 Unicast
+      Route-Reflector Client
+      Community attribute sent to this neighbor(both)
+      0 accepted prefixes
+      Connections established 1; dropped 0
+      Last reset never
+    Local host: 192.168.1.242, Local port: 179
+    Foreign host: 192.168.1.102, Foreign port: 59150
+    Nexthop: 192.168.1.242
+    Nexthop global: ::
+    Nexthop local: ::
+    BGP connection: non shared network
+    Read thread: on  Write thread: off
+
+    Note: In the above sample 192.168.1.102 is ODL_IP, 192.168.1.242 is QUAGGA_VM_IP and 64496 is the AS_NUMBER to which the peers belong to.
+    As per RFC a BGP implementation MUST connect to and listen on TCP port 179 as seen in the samples above.
+
+* Summary:
+
+- Each BGP provider instance in our case 'example-bgp-peer' is configured in the file 41-bgp-example.xml in Opendaylight implementation with a unique RIB id, for example in our case: rib-id is “example-bgp-rib”.
+
+- For every BGP provider instance a unique topology is defined to advertise certain type of routes. In our case we define three topologies: “example-ipv4-topology” of type bgp-reachability-ipv4, “example-linkstate-topology” of type bgp-linkstate-topology and “example-ipv6-topology” of type bgp-reachability-ipv6.
+
+- For every rib-id configured, an application BGP peer (of module type bgp-application-peer) is configured with a unique application rib-id.
+
+**Retrieving BGP and RIB Information** +
+* Import the tutorial-bgp json payload collection to Postman. Open postman application and use the import button to navigate to the tutorial material directory
+and add the tutorial-bgp.postman_collection.json to your collection.
+
+Use the REST GET API to get these BGP and RIB information that were configured in previous section.
+
+**Adding IPv4 routes** +
+* To populate the RIB of the application peer with IPv4 routes, use the PUT request from the postman collection.
+To remove the route use the same API with a DELETE operation with no payload.
+
+Verify on Quagga VM using the below command:
+
+    quagga-vm# show ip bgp
+    BGP table version is 0, local router ID is 192.168.1.242
+    Status codes: s suppressed, d damped, h history, * valid, > best, i - internal,
+              r RIB-failure, S Stale, R Removed
+    Origin codes: i - IGP, e - EGP, ? - incomplete
+    Network          Next Hop            Metric LocPrf Weight Path
+    *>i2.1.1.1/32       192.168.1.102            0   1000      0 i
+    *> 192.0.2.0        0.0.0.0                  0         32768 i
+    Total number of prefixes 2
+
+== Conclusion
+Opendaylight provides BGP implementation to manage and configure Opendaylight as a BGP Speaker and Peer and to establish BGP session to remote BGP routers to manage BGP routes.
